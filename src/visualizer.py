@@ -3,14 +3,22 @@
 绘制物品的重量-价值散点图
 """
 
-import matplotlib.pyplot as plt
-import matplotlib
-import numpy as np
 import os
 import platform
 from typing import List, Optional, Union
 from dataclasses import dataclass
-from matplotlib.lines import Line2D
+
+# 尝试导入必需的库
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib
+    import numpy as np
+    from matplotlib.lines import Line2D
+    MATPLOTLIB_AVAILABLE = True
+except ImportError as e:
+    MATPLOTLIB_AVAILABLE = False
+    print(f"警告: 无法导入可视化库: {e}")
+    print("请安装 matplotlib 和 numpy: pip install matplotlib numpy")
 
 from data_structures import ItemSet, Item
 
@@ -32,6 +40,9 @@ class FontConfig:
     @classmethod
     def setup(cls) -> bool:
         """设置matplotlib支持中文显示"""
+        if not MATPLOTLIB_AVAILABLE:
+            return False
+
         if cls._supported is not None:
             return cls._supported
 
@@ -146,6 +157,11 @@ class Visualizer:
         Args:
             style: 图表样式配置，为None时使用默认配置
         """
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法使用可视化功能")
+            print("请运行: pip install matplotlib numpy")
+            return
+
         FontConfig.setup()
         self.style = style or PlotStyle()
 
@@ -167,6 +183,10 @@ class Visualizer:
             save_path: 保存路径（如果为None则不保存）
             max_sets_display: 最多显示多少个项集的不同颜色
         """
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
+
         if not item_sets:
             print("警告: 没有数据可绘制")
             return
@@ -257,16 +277,11 @@ class Visualizer:
         max_sets: int = 5,
         save_path: Optional[str] = None
     ) -> None:
-        """
-        绘制每个项集内三个物品的对比图
+        """绘制每个项集内三个物品的对比图"""
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
 
-        Args:
-            item_sets: 项集列表
-            title: 图表标题
-            show_plot: 是否显示图表
-            max_sets: 最多显示多少个项集
-            save_path: 保存路径
-        """
         if not item_sets:
             print("警告: 没有数据可绘制")
             return
@@ -325,16 +340,11 @@ class Visualizer:
         max_sets: int = 50,
         save_path: Optional[str] = None
     ) -> None:
-        """
-        绘制每个项集的价值重量比分布
+        """绘制每个项集的价值重量比分布"""
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
 
-        Args:
-            item_sets: 项集列表
-            title: 图表标题
-            show_plot: 是否显示图表
-            max_sets: 最多显示多少个项集
-            save_path: 保存路径
-        """
         if not item_sets:
             print("警告: 没有数据可绘制")
             return
@@ -405,10 +415,12 @@ class Visualizer:
 # ==================== 向后兼容的函数 ====================
 
 # 创建全局实例用于向后兼容
-_default_visualizer = Visualizer()
+_default_visualizer = Visualizer() if MATPLOTLIB_AVAILABLE else None
 
 def setup_plot_for_chinese() -> bool:
     """设置绘图支持中文的辅助函数（向后兼容）"""
+    if not MATPLOTLIB_AVAILABLE:
+        return False
     return FontConfig.setup()
 
 
@@ -420,14 +432,23 @@ def plot_scatter(item_sets: List[ItemSet], **kwargs):
         item_sets: 项集列表（必需）
         **kwargs: 其他参数传递给 Visualizer.plot_scatter
     """
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
     return _default_visualizer.plot_scatter(item_sets, **kwargs)
 
 
 def plot_item_sets_comparison(item_sets: List[ItemSet], **kwargs):
     """向后兼容的对比图函数"""
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
     return _default_visualizer.plot_item_sets_comparison(item_sets, **kwargs)
 
 
 def plot_value_weight_ratio(item_sets: List[ItemSet], **kwargs):
     """向后兼容的比率图函数"""
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
     return _default_visualizer.plot_value_weight_ratio(item_sets, **kwargs)
