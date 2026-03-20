@@ -3,311 +3,452 @@
 绘制物品的重量-价值散点图
 """
 
-import matplotlib.pyplot as plt
-import matplotlib
-import numpy as np
 import os
-from typing import List
+import platform
+from typing import List, Optional, Union
+from dataclasses import dataclass
+
+# 尝试导入必需的库
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib
+    import numpy as np
+    from matplotlib.lines import Line2D
+    MATPLOTLIB_AVAILABLE = True
+except ImportError as e:
+    MATPLOTLIB_AVAILABLE = False
+    print(f"警告: 无法导入可视化库: {e}")
+    print("请安装 matplotlib 和 numpy: pip install matplotlib numpy")
+
 from data_structures import ItemSet, Item
 
-# 设置中文字体
-def setup_chinese_font():
-    """设置matplotlib支持中文显示"""
-    import platform
 
-    system = platform.system()
+# ==================== 字体配置 ====================
 
-    if system == "Windows":
-        # Windows系统
-        font_list = ['Microsoft YaHei', 'SimHei', 'KaiTi', 'FangSong']
-        for font in font_list:
+class FontConfig:
+    """中文字体配置管理器"""
+
+    # 各系统的字体候选列表
+    FONT_CANDIDATES = {
+        "Windows": ['Microsoft YaHei', 'SimHei', 'KaiTi', 'FangSong'],
+        "Darwin": ['Arial Unicode MS', 'Heiti TC', 'PingFang SC'],
+        "Linux": ['WenQuanYi Zen Hei', 'Noto Sans CJK SC']
+    }
+
+    _supported = None
+
+    @classmethod
+    def setup(cls) -> bool:
+        """设置matplotlib支持中文显示"""
+        if not MATPLOTLIB_AVAILABLE:
+            return False
+
+        if cls._supported is not None:
+            return cls._supported
+
+        system = platform.system()
+        candidates = cls.FONT_CANDIDATES.get(system, [])
+
+        # 设置通用配置
+        matplotlib.rcParams['axes.unicode_minus'] = False
+
+        # 尝试每个候选字体
+        for font in candidates:
             try:
-                matplotlib.rcParams['font.sans-serif'] = [font] + matplotlib.rcParams['font.sans-serif']
-                matplotlib.rcParams['axes.unicode_minus'] = False
+                matplotlib.rcParams['font.sans-serif'] = [font] + matplotlib.rcParams.get('font.sans-serif', [])
                 # 测试字体是否可用
-                plt.figure()
-                plt.text(0.5, 0.5, '测试', fontproperties=font)
-                plt.close()
+                fig = plt.figure()
+                fig.text(0.5, 0.5, '测试', fontproperties=font)
+                plt.close(fig)
                 print(f"使用字体: {font}")
+                cls._supported = True
                 return True
             except:
                 continue
-    elif system == "Darwin":  # macOS
-        try:
-            matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti TC', 'PingFang SC'] + matplotlib.rcParams['font.sans-serif']
-            matplotlib.rcParams['axes.unicode_minus'] = False
-        except:
-            pass
-    else:  # Linux
-        try:
-            matplotlib.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'Noto Sans CJK SC'] + matplotlib.rcParams['font.sans-serif']
-            matplotlib.rcParams['axes.unicode_minus'] = False
-        except:
-            pass
 
-    # 如果上面的字体都不可用，尝试使用默认字体但添加回退
-    matplotlib.rcParams['axes.unicode_minus'] = False
-    return False
+        cls._supported = False
+        print("警告: 系统可能不支持中文显示，图表中的中文将显示为方框")
+        return False
 
+    @classmethod
+    def is_supported(cls) -> bool:
+        """检查中文是否支持"""
+        if cls._supported is None:
+            cls.setup()
+        return cls._supported
+
+
+# ==================== 图表样式配置 ====================
+
+@dataclass
+class PlotStyle:
+    """图表样式配置"""
+    # 图形尺寸
+    figsize_scatter: tuple = (12, 8)
+    figsize_comparison: tuple = (5, 4)
+    figsize_ratio: tuple = (12, 6)
+
+    # 颜色
+    color_palette: str = 'tab20'
+
+    # 标记样式 [物品1, 物品2, 物品3]
+    markers: List[str] = None
+    marker_sizes: List[int] = None
+    alpha_values: List[float] = None
+
+    # 网格
+    grid_alpha: float = 0.3
+    grid_linestyle: str = '--'
+
+    # 文本
+    label_fontsize: int = 14
+    label_fontweight: str = 'bold'
+    title_fontsize: int = 16
+    title_fontweight: str = 'bold'
+
+    def __post_init__(self):
+        if self.markers is None:
+            self.markers = ['o', 's', '^']
+        if self.marker_sizes is None:
+            self.marker_sizes = [60, 60, 80]
+        if self.alpha_values is None:
+            self.alpha_values = [0.6, 0.6, 0.8]
+
+
+# ==================== 文本处理 ====================
+
+class TextHelper:
+    """文本辅助类，处理中英文切换"""
+
+    TRANSLATIONS = {
+        'scatter_title': ('D{0-1}KP物品散点图', 'D{0-1}KP Scatter Plot'),
+        'comparison_title': ('项集内物品对比', 'Item Set Comparison'),
+        'ratio_title': ('价值重量比分布', 'Value/Weight Ratio Distribution'),
+        'weight': ('重量', 'Weight'),
+        'value': ('价值', 'Value'),
+        'item_index': ('物品索引', 'Item Index'),
+        'value_weight_ratio': ('价值/重量比', 'Value/Weight Ratio'),
+        'set_id': ('项集ID', 'Item Set ID'),
+        'item1': ('物品1', 'Item 1'),
+        'item2': ('物品2', 'Item 2'),
+        'item3': ('物品3 (折扣)', 'Item 3 (Discounted)'),
+        'other_sets': ('其他项集', 'Other Sets'),
+        'total_items': ('总物品数', 'Total Items'),
+        'total_sets': ('项集数', 'Sets'),
+    }
+
+    @classmethod
+    def get_text(cls, key: str, *args) -> str:
+        """获取本地化文本"""
+        cn_text, en_text = cls.TRANSLATIONS.get(key, (key, key))
+        text = cn_text if FontConfig.is_supported() else en_text
+        return text.format(*args) if args else text
+
+
+# ==================== 可视化器 ====================
 
 class Visualizer:
     """数据可视化器"""
 
-    def __init__(self):
-        """初始化可视化器，设置中文字体"""
-        self.font_supported = setup_chinese_font()
-        if not self.font_supported:
-            print("警告: 系统可能不支持中文显示，图表中的中文将显示为方框")
+    def __init__(self, style: Optional[PlotStyle] = None):
+        """
+        初始化可视化器
 
-    @staticmethod
-    def plot_scatter(item_sets: List[ItemSet],
-                     title: str = "D{0-1}KP物品散点图",
-                     show_plot: bool = True,
-                     save_path: str = None):
+        Args:
+            style: 图表样式配置，为None时使用默认配置
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法使用可视化功能")
+            print("请运行: pip install matplotlib numpy")
+            return
+
+        FontConfig.setup()
+        self.style = style or PlotStyle()
+
+    def plot_scatter(
+        self,
+        item_sets: List[ItemSet],
+        title: Optional[str] = None,
+        show_plot: bool = True,
+        save_path: Optional[str] = None,
+        max_sets_display: int = 20
+    ) -> None:
         """
         绘制所有物品的重量-价值散点图
 
         Args:
             item_sets: 项集列表
-            title: 图表标题
+            title: 图表标题，为None时使用默认标题
             show_plot: 是否显示图表
             save_path: 保存路径（如果为None则不保存）
+            max_sets_display: 最多显示多少个项集的不同颜色
         """
-        # 创建图形，设置dpi提高清晰度
-        plt.figure(figsize=(12, 8), dpi=100)
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
 
-        # 收集所有物品
-        all_items = []
-        for item_set in item_sets:
-            all_items.extend(item_set.items)
+        if not item_sets:
+            print("警告: 没有数据可绘制")
+            return
 
-        # 提取重量和价值
-        weights = [item.weight for item in all_items]
-        values = [item.value for item in all_items]
+        # 创建图形
+        plt.figure(figsize=self.style.figsize_scatter, dpi=100)
 
-        # 计算统计信息用于图例
+        # 收集统计信息
+        all_items = [item for item_set in item_sets for item in item_set.items]
         total_items = len(all_items)
         total_sets = len(item_sets)
 
-        # 按项集分组着色，使用更鲜明的颜色
-        colors = plt.cm.tab20(np.linspace(0, 1, min(len(item_sets), 20)))
+        # 按项集分组着色
+        colors = plt.cm.get_cmap(self.style.color_palette)(
+            np.linspace(0, 1, min(total_sets, max_sets_display))
+        )
 
-        # 创建散点图
-        for idx, item_set in enumerate(item_sets[:20]):  # 最多显示20个项集，避免颜色过多
-            set_weights = [item.weight for item in item_set.items]
-            set_values = [item.value for item in item_set.items]
+        # 绘制每个项集的物品
+        for idx, item_set in enumerate(item_sets[:max_sets_display]):
+            weights = [item.weight for item in item_set.items]
+            values = [item.value for item in item_set.items]
 
-            # 为每个项集的三个物品使用不同标记
-            markers = ['o', 's', '^']  # 物品1:圆圈, 物品2:方块, 物品3:三角形
-            marker_sizes = [60, 60, 80]  # 物品3稍微大一点突出显示
-            alpha_values = [0.6, 0.6, 0.8]  # 物品3更不透明
+            for i, (w, v) in enumerate(zip(weights, values)):
+                plt.scatter(
+                    w, v,
+                    c=[colors[idx % len(colors)]],
+                    marker=self.style.markers[i],
+                    s=self.style.marker_sizes[i],
+                    alpha=self.style.alpha_values[i],
+                    edgecolors='black' if i == 2 else None,
+                    linewidth=0.5 if i == 2 else 0
+                )
 
-            for i in range(3):
-                plt.scatter(set_weights[i], set_values[i],
-                          c=[colors[idx % len(colors)]],
-                          marker=markers[i],
-                          s=marker_sizes[i],
-                          alpha=alpha_values[i],
-                          edgecolors='black' if i == 2 else None,
-                          linewidth=0.5 if i == 2 else 0)
-
-        # 添加其他未显示的项集（灰色小点）
-        if len(item_sets) > 20:
+        # 绘制其他项集（灰色小点）
+        if total_sets > max_sets_display:
             other_weights = []
             other_values = []
-            for item_set in item_sets[20:]:
+            for item_set in item_sets[max_sets_display:]:
                 for item in item_set.items:
                     other_weights.append(item.weight)
                     other_values.append(item.value)
-            plt.scatter(other_weights, other_values,
-                      c='lightgray', marker='.', s=20, alpha=0.3, label='其他项集')
+            plt.scatter(
+                other_weights, other_values,
+                c='lightgray', marker='.', s=20, alpha=0.3,
+                label=TextHelper.get_text('other_sets')
+            )
 
-        # 设置标签和标题
-        plt.xlabel('重量', fontsize=14, fontweight='bold')
-        plt.ylabel('价值', fontsize=14, fontweight='bold')
+        # 设置标签
+        plt.xlabel(TextHelper.get_text('weight'), fontsize=self.style.label_fontsize, fontweight=self.style.label_fontweight)
+        plt.ylabel(TextHelper.get_text('value'), fontsize=self.style.label_fontsize, fontweight=self.style.label_fontweight)
 
-        # 处理标题中的中文
-        if not setup_chinese_font():
-            # 如果中文不支持，使用英文标题
-            title = title.replace('散点图', 'Scatter Plot')
-            title = title.replace('数据集', 'Dataset')
-            title = title.replace('容量', 'Capacity')
-
-        plt.title(title, fontsize=16, fontweight='bold', pad=20)
+        # 设置标题
+        if title is None:
+            title = TextHelper.get_text('scatter_title')
+        plt.title(title, fontsize=self.style.title_fontsize, fontweight=self.style.title_fontweight, pad=20)
 
         # 添加网格
-        plt.grid(True, alpha=0.3, linestyle='--')
+        plt.grid(True, alpha=self.style.grid_alpha, linestyle=self.style.grid_linestyle)
 
         # 添加统计信息
-        stats_text = f'总物品数: {total_items} | 项集数: {total_sets}'
-        plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
-                fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        stats_text = f'{TextHelper.get_text("total_items")}: {total_items} | {TextHelper.get_text("total_sets")}: {total_sets}'
+        plt.text(
+            0.02, 0.98, stats_text,
+            transform=plt.gca().transAxes,
+            fontsize=10, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        )
 
         # 创建图例
-        legend_elements = []
-        # 添加物品类型图例
-        from matplotlib.lines import Line2D
-        legend_elements.extend([
+        legend_elements = [
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
-                   markersize=8, label='物品1'),
+                   markersize=8, label=TextHelper.get_text('item1')),
             Line2D([0], [0], marker='s', color='w', markerfacecolor='gray',
-                   markersize=8, label='物品2'),
+                   markersize=8, label=TextHelper.get_text('item2')),
             Line2D([0], [0], marker='^', color='w', markerfacecolor='gray',
-                   markersize=8, markeredgecolor='black', label='物品3 (折扣)')
-        ])
-
+                   markersize=8, markeredgecolor='black', label=TextHelper.get_text('item3'))
+        ]
         plt.legend(handles=legend_elements, loc='upper right',
-                  framealpha=0.9, fontsize=10)
+                   framealpha=0.9, fontsize=10)
 
-        # 调整布局
-        plt.tight_layout()
+        self._save_and_show(plt.gcf(), save_path, show_plot)
 
-        # 保存图片
-        if save_path:
-            # 确保目录存在
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            plt.savefig(save_path, dpi=300, bbox_inches='tight',
-                       facecolor='white', edgecolor='none')
-            print(f"图表已保存到: {save_path}")
+    def plot_item_sets_comparison(
+        self,
+        item_sets: List[ItemSet],
+        title: Optional[str] = None,
+        show_plot: bool = True,
+        max_sets: int = 5,
+        save_path: Optional[str] = None
+    ) -> None:
+        """绘制每个项集内三个物品的对比图"""
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
 
-        # 显示图片
-        if show_plot:
-            plt.show()
-        else:
-            plt.close()
+        if not item_sets:
+            print("警告: 没有数据可绘制")
+            return
 
-    @staticmethod
-    def plot_item_sets_comparison(item_sets: List[ItemSet],
-                                   title: str = "项集内物品对比",
-                                   show_plot: bool = True,
-                                   max_sets: int = 5):
-        """
-        绘制每个项集内三个物品的对比图
-
-        Args:
-            item_sets: 项集列表
-            title: 图表标题
-            show_plot: 是否显示图表
-            max_sets: 最多显示多少个项集
-        """
         n_sets = min(len(item_sets), max_sets)
-        fig, axes = plt.subplots(1, n_sets, figsize=(5*n_sets, 4))
+        fig, axes = plt.subplots(1, n_sets, figsize=(self.style.figsize_comparison[0] * n_sets, self.style.figsize_comparison[1]))
 
         if n_sets == 1:
             axes = [axes]
 
-        for idx in range(n_sets):
-            item_set = item_sets[idx]
-            ax = axes[idx]
+        width = 0.35
+        x = range(3)
 
+        for idx, ax in enumerate(axes):
+            item_set = item_sets[idx]
             items = item_set.items
-            x = range(3)
+
             weights = [item.weight for item in items]
             values = [item.value for item in items]
 
-            width = 0.35
+            # 绘制柱状图
             bars1 = ax.bar([i - width/2 for i in x], weights, width,
-                          label='重量', color='skyblue', alpha=0.7)
+                          label=TextHelper.get_text('weight'), color='skyblue', alpha=0.7)
             bars2 = ax.bar([i + width/2 for i in x], values, width,
-                          label='价值', color='lightcoral', alpha=0.7)
+                          label=TextHelper.get_text('value'), color='lightcoral', alpha=0.7)
 
-            # 在柱子上添加数值标签
-            for bar in bars1:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}', ha='center', va='bottom', fontsize=8)
-            for bar in bars2:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}', ha='center', va='bottom', fontsize=8)
+            # 添加数值标签
+            self._add_bar_labels(bars1, ax)
+            self._add_bar_labels(bars2, ax)
 
             # 设置标签
-            ax.set_xlabel('物品索引', fontsize=10)
-            ax.set_ylabel('数值', fontsize=10)
+            ax.set_xlabel(TextHelper.get_text('item_index'), fontsize=10)
+            ax.set_ylabel(TextHelper.get_text('value'), fontsize=10)
 
-            # 处理标题中的中文
-            title_text = f'项集 {item_set.id}'
-            if not setup_chinese_font():
-                title_text = f'Set {item_set.id}'
+            # 设置标题
+            title_text = f'Set {item_set.id}' if not FontConfig.is_supported() else f'项集 {item_set.id}'
             ax.set_title(title_text, fontsize=11, fontweight='bold')
 
             ax.set_xticks(x)
-            ax.set_xticklabels(['物品1', '物品2', '物品3'] if setup_chinese_font() else ['Item1', 'Item2', 'Item3'])
+            ax.set_xticklabels([TextHelper.get_text('item1'), TextHelper.get_text('item2'), TextHelper.get_text('item3')])
             ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3, axis='y')
+            ax.grid(True, alpha=self.style.grid_alpha, axis='y')
 
         # 设置总标题
-        if setup_chinese_font():
-            fig.suptitle(title, fontsize=14, fontweight='bold', y=1.05)
-        else:
-            fig.suptitle('Item Set Comparison', fontsize=14, fontweight='bold', y=1.05)
+        if title is None:
+            title = TextHelper.get_text('comparison_title')
+        fig.suptitle(title, fontsize=self.style.title_fontsize, fontweight=self.style.title_fontweight, y=1.05)
 
-        plt.tight_layout()
+        self._save_and_show(fig, save_path, show_plot)
 
-        if show_plot:
-            plt.show()
-        else:
-            plt.close()
+    def plot_value_weight_ratio(
+        self,
+        item_sets: List[ItemSet],
+        title: Optional[str] = None,
+        show_plot: bool = True,
+        max_sets: int = 50,
+        save_path: Optional[str] = None
+    ) -> None:
+        """绘制每个项集的价值重量比分布"""
+        if not MATPLOTLIB_AVAILABLE:
+            print("错误: matplotlib 未安装，无法绘制图表")
+            return
 
-    @staticmethod
-    def plot_value_weight_ratio(item_sets: List[ItemSet],
-                               title: str = "价值重量比分布",
-                               show_plot: bool = True):
-        """
-        绘制每个项集的价值重量比分布
+        if not item_sets:
+            print("警告: 没有数据可绘制")
+            return
 
-        Args:
-            item_sets: 项集列表
-            title: 图表标题
-            show_plot: 是否显示图表
-        """
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=self.style.figsize_ratio)
 
-        # 收集每个项集的三个物品的比率
+        # 收集数据
         set_ids = []
-        ratios_item1 = []
-        ratios_item2 = []
-        ratios_item3 = []
+        ratios = [[], [], []]  # [物品1比率列表, 物品2比率列表, 物品3比率列表]
 
-        for item_set in item_sets[:50]:  # 最多显示50个项集
+        for item_set in item_sets[:max_sets]:
             set_ids.append(item_set.id)
-            ratios_item1.append(item_set.items[0].ratio)
-            ratios_item2.append(item_set.items[1].ratio)
-            ratios_item3.append(item_set.items[2].ratio)
+            for i, item in enumerate(item_set.items):
+                ratios[i].append(item.ratio)
 
         x = range(len(set_ids))
         width = 0.25
 
-        plt.bar([i - width for i in x], ratios_item1, width,
-               label='物品1', alpha=0.7, color='skyblue')
-        plt.bar(x, ratios_item2, width,
-               label='物品2', alpha=0.7, color='lightcoral')
-        plt.bar([i + width for i in x], ratios_item3, width,
-               label='物品3 (折扣)', alpha=0.8, color='gold', edgecolor='black')
+        # 绘制柱状图
+        colors = ['skyblue', 'lightcoral', 'gold']
+        labels = [TextHelper.get_text('item1'), TextHelper.get_text('item2'), TextHelper.get_text('item3')]
+        edgecolors = [None, None, 'black']
 
-        plt.xlabel('项集ID' if setup_chinese_font() else 'Item Set ID', fontsize=12)
-        plt.ylabel('价值/重量比' if setup_chinese_font() else 'Value/Weight Ratio', fontsize=12)
+        for i in range(3):
+            positions = [pos + (i - 1) * width for pos in x]
+            plt.bar(
+                positions, ratios[i], width,
+                label=labels[i], alpha=0.7, color=colors[i], edgecolor=edgecolors[i]
+            )
 
-        if setup_chinese_font():
-            plt.title(title, fontsize=14, fontweight='bold')
-        else:
-            plt.title('Value/Weight Ratio Distribution', fontsize=14, fontweight='bold')
+        plt.xlabel(TextHelper.get_text('set_id'), fontsize=self.style.label_fontsize)
+        plt.ylabel(TextHelper.get_text('value_weight_ratio'), fontsize=self.style.label_fontsize)
+
+        if title is None:
+            title = TextHelper.get_text('ratio_title')
+        plt.title(title, fontsize=self.style.title_fontsize, fontweight=self.style.title_fontweight)
 
         plt.legend()
-        plt.grid(True, alpha=0.3, axis='y')
-        plt.tight_layout()
+        plt.grid(True, alpha=self.style.grid_alpha, axis='y')
+
+        self._save_and_show(plt.gcf(), save_path, show_plot)
+
+    @staticmethod
+    def _add_bar_labels(bars, ax) -> None:
+        """为柱状图添加数值标签"""
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2., height,
+                f'{int(height)}', ha='center', va='bottom', fontsize=8
+            )
+
+    @staticmethod
+    def _save_and_show(fig, save_path: Optional[str], show_plot: bool) -> None:
+        """保存并显示图表"""
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            fig.savefig(save_path, dpi=300, bbox_inches='tight',
+                        facecolor='white', edgecolor='none')
+            print(f"图表已保存到: {save_path}")
 
         if show_plot:
             plt.show()
         else:
-            plt.close()
+            plt.close(fig)
 
 
-# 为了兼容性，保留原来的函数调用方式
-def setup_plot_for_chinese():
-    """设置绘图支持中文的辅助函数"""
-    success = setup_chinese_font()
-    if not success:
-        print("提示: 如果中文显示为方框，请安装中文字体或使用英文标题")
-    return success
+# ==================== 向后兼容的函数 ====================
+
+# 创建全局实例用于向后兼容
+_default_visualizer = Visualizer() if MATPLOTLIB_AVAILABLE else None
+
+def setup_plot_for_chinese() -> bool:
+    """设置绘图支持中文的辅助函数（向后兼容）"""
+    if not MATPLOTLIB_AVAILABLE:
+        return False
+    return FontConfig.setup()
+
+
+def plot_scatter(item_sets: List[ItemSet], **kwargs):
+    """
+    向后兼容的散点图函数
+
+    Args:
+        item_sets: 项集列表（必需）
+        **kwargs: 其他参数传递给 Visualizer.plot_scatter
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
+    return _default_visualizer.plot_scatter(item_sets, **kwargs)
+
+
+def plot_item_sets_comparison(item_sets: List[ItemSet], **kwargs):
+    """向后兼容的对比图函数"""
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
+    return _default_visualizer.plot_item_sets_comparison(item_sets, **kwargs)
+
+
+def plot_value_weight_ratio(item_sets: List[ItemSet], **kwargs):
+    """向后兼容的比率图函数"""
+    if not MATPLOTLIB_AVAILABLE:
+        print("错误: matplotlib 未安装，无法绘制图表")
+        return
+    return _default_visualizer.plot_value_weight_ratio(item_sets, **kwargs)
