@@ -171,15 +171,16 @@ class D0_1KPSolver:
 
         # 生成保存路径
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        save_path = f"results/scatter_dataset{self.current_dataset_index+1}_{timestamp}.png"
+        save_path = f"results/scatter_dataset{self.current_dataset_index + 1}_{timestamp}.png"
 
-        Visualizer.plot_scatter(
-            current_dataset,
-            title=f"D{{0-1}}KP散点图 - 数据集{self.current_dataset_index+1} (容量: {self.current_capacity:.2f})",
+        # 修复：创建 Visualizer 实例，然后调用实例方法
+        visualizer = Visualizer()  # 创建实例
+        visualizer.plot_scatter(
+            current_dataset,  # 第一个参数是 item_sets
+            title=f"D{{0-1}}KP散点图 - 数据集{self.current_dataset_index + 1} (容量: {self.current_capacity:.2f})",
             show_plot=True,
             save_path=save_path
         )
-
     def sort_by_ratio(self):
         """按第三项价值重量比排序"""
         if not self.item_sets:
